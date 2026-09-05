@@ -1,0 +1,30 @@
+[Unit]
+Description=Homelab WebUI Backend
+After=network-online.target homelab-webui-network.network zfs.target
+Wants=network-online.target homelab-webui-network.network
+Requires=docker.socket
+After=docker.socket
+
+[Container]
+Image=ghcr.io/just-a-dev20/homelab-webui-backend:latest
+ContainerName=homelab-webui-backend
+Network=homelab-webui-network.network
+PublishPort=3001:3001
+Environment=PORT=3001
+Environment=NODE_ENV=production
+# Pool configuration (Settings → Storage) persists in /var (writable on bootc).
+Environment=POOLS_FILE=/data/pools/pools.json
+Volume=/var/run/docker.sock:/var/run/docker.sock:ro
+Volume=/var/lib/homelab-webui:/data
+# Host drives: configure pools on ZFS datasets mounted under /mnt
+# (e.g. /mnt/tank/homelab) so all app + user files live on ZFS.
+Volume=/mnt:/mnt
+AutoUpdate=registry
+PullPolicy=always
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target default.target

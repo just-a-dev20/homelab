@@ -1,0 +1,19 @@
+[Unit]
+Description=Homelab WebUI Frontend
+After=network-online.target homelab-webui-network.network homelab-webui-backend.container
+Wants=network-online.target homelab-webui-network.network homelab-webui-backend.container
+
+[Container]
+Image=ghcr.io/just-a-dev20/homelab-webui-frontend:latest
+ContainerName=homelab-webui-frontend
+Network=homelab-webui-network.network
+PublishPort=80:80
+AutoUpdate=registry
+PullPolicy=always
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target default.target
