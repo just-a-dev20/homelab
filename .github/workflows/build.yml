@@ -138,21 +138,27 @@ jobs:
 
           echo "digest=${digest}" >> $GITHUB_OUTPUT
 
-      # Container signing using Cosign (runs only if SIGNING_SECRET is configured)
+      # Container signing using Cosign (skips at runtime if SIGNING_SECRET is not configured).
+      # NOTE: `secrets` cannot be used in `if:` (unsupported on some runners/linters),
+      # so we gate on event/ref here and check the secret inside `run:` instead.
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && secrets.SIGNING_SECRET != ''
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         with:
           cosign-release: 'v3.1.2'
 
       - name: Sign container image
         id: sign-image
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && secrets.SIGNING_SECRET != ''
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         env:
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           DIGEST: ${{ steps.push-image.outputs.digest }}
         run: |
+          if [ -z "${COSIGN_PRIVATE_KEY:-}" ]; then
+            echo "SIGNING_SECRET not set, skipping signing."
+            exit 0
+          fi
           # https://github.com/containers/container-libs/issues/388
           # https://github.com/coreos/rpm-ostree/issues/5509
           # use old bundle format, so we can use newer cosign 3.X.X instead of 2.X.X
