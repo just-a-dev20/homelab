@@ -53,10 +53,14 @@ for unit in zfs.target zfs-import.target zfs-import-cache.service zfs-mount.serv
     fi
 done
 
-### Enable Homelab WebUI quadlet services
-systemctl enable homelab-webui-network.network
-systemctl enable homelab-webui-backend.container
-systemctl enable homelab-webui-frontend.container
+### Homelab WebUI quadlet services
+# NOTE: Quadlet units (.container/.network/.volume/...) generate transient
+# systemd services (foo.container -> foo.service, foo.network -> foo-network.service),
+# so they MUST NOT be enabled with `systemctl enable` (it fails with
+# "Unit ... does not exist" / "transient or generated").
+# Instead, the quadlet generator auto-enables them at boot from their
+# [Install] WantedBy= sections. Just ensure the files are present under
+# /etc/containers/systemd (copied above) and carry an [Install] section.
 
 ### Configure firewall for Homelab WebUI
 firewall-offline-cmd --zone=public --add-service=homelab-webui

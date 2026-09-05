@@ -1,9 +1,10 @@
 [Unit]
 Description=Homelab WebUI Backend
-After=network-online.target homelab-webui-network.network zfs.target
-Wants=network-online.target homelab-webui-network.network
+# NOTE: reference generated systemd names (foo.network -> foo-network.service,
+# foo.container -> foo.service), not the quadlet filenames.
+After=network-online.target homelab-webui-network-network.service zfs.target docker.socket
+Wants=network-online.target homelab-webui-network-network.service
 Requires=docker.socket
-After=docker.socket
 
 [Container]
 Image=ghcr.io/just-a-dev20/homelab-webui-backend:latest

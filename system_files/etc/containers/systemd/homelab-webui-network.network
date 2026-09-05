@@ -4,3 +4,9 @@ Driver=bridge
 DisableDNS=false
 IPAMConfig=
 Internal=false
+
+[Install]
+# Required: quadlet auto-enables the generated
+# homelab-webui-network-network.service from this section.
+# Do NOT `systemctl enable` quadlet files (generated units are transient).
+WantedBy=multi-user.target default.target

@@ -1,7 +1,8 @@
 [Unit]
 Description=Homelab WebUI Frontend
-After=network-online.target homelab-webui-network.network homelab-webui-backend.container
-Wants=network-online.target homelab-webui-network.network homelab-webui-backend.container
+# NOTE: reference generated systemd names, not quadlet filenames.
+After=network-online.target homelab-webui-network-network.service homelab-webui-backend.service
+Wants=network-online.target homelab-webui-network-network.service homelab-webui-backend.service
 
 [Container]
 Image=ghcr.io/just-a-dev20/homelab-webui-frontend:latest
