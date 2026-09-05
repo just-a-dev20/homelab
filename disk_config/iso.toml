@@ -1,19 +1,40 @@
 [customizations.installer.kickstart]
+# NOTE: bootc-image-builder auto-injects the `ostreecontainer` payload
+# (the container image passed to BIB). Do NOT add `ostreecontainer`/`bootc`
+# payload commands here, and do NOT `bootc switch` in %post (that would
+# require network at install time and pull a floating :latest instead of
+# the image embedded in this ISO). The installed system already tracks the
+# embedded image; rebase explicitly after first boot if needed:
+#   sudo bootc switch ghcr.io/just-a-dev20/homelab:latest
+#
+# This is a partial kickstart: locale, network, partitioning and reboot are
+# automated, user/root creation stays interactive (Users module enabled).
+# No passwords or sshkeys are hardcoded in this repo on purpose.
 contents = """
-%post
-bootc switch --mutate-in-place --transport registry ghcr.io/just-a-dev20/homelab:latest
-%end
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+network --bootproto=dhcp --device=link --activate --onboot=on
+zerombr
+clearpart --all --initlabel --disklabel=gpt
+autopart --type=plain
+reboot --eject
 """
 
 [customizations.installer.modules]
+# BIB defaults are Network, Payloads, Security, Services, Storage, Users.
+# We add Localization + Timezone for the lang/keyboard/timezone commands
+# above. Payloads is REQUIRED (ostreecontainer deployment). Subscription
+# stays disabled (not used on Fedora/uCore).
 enable = [
-  "org.fedoraproject.Anaconda.Modules.Storage",
-  "org.fedoraproject.Anaconda.Modules.Runtime",
+  "org.fedoraproject.Anaconda.Modules.Localization",
   "org.fedoraproject.Anaconda.Modules.Network",
+  "org.fedoraproject.Anaconda.Modules.Payloads",
   "org.fedoraproject.Anaconda.Modules.Security",
   "org.fedoraproject.Anaconda.Modules.Services",
+  "org.fedoraproject.Anaconda.Modules.Storage",
+  "org.fedoraproject.Anaconda.Modules.Timezone",
   "org.fedoraproject.Anaconda.Modules.Users",
-  "org.fedoraproject.Anaconda.Modules.Timezone"
 ]
 
 disable = [
