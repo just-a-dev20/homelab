@@ -2,6 +2,7 @@
 
 [![Build container image](https://github.com/just-a-dev20/homelab/actions/workflows/build.yml/badge.svg)](https://github.com/just-a-dev20/homelab/actions/workflows/build.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/just-a-dev20/AI?utm_source=oss&utm_medium=github&utm_campaign=just-a-dev20%2FAI&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 **Homelab OS** is a custom, bootable container operating system image (`bootc`) built on **Fedora** and **Universal Blue ([uCore](https://github.com/ublue-os/ucore))**. It is designed for homelab servers, self-hosting, containerized microservices, and virtualization hosts.
 
