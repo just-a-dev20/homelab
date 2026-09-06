@@ -10,11 +10,15 @@ ContainerName=homelab-webui-frontend
 Network=homelab-webui-network.network
 PublishPort=80:80
 AutoUpdate=registry
-PullPolicy=always
+# Pull policy (quadlet key is `Pull=`, not `PullPolicy=`).
+# `missing` = pull once, then boot offline from cache; updates via auto-update timer.
+Pull=missing
 
 [Service]
 Restart=always
 RestartSec=10
+# First boot pulls images; allow time so systemd doesn't kill a slow pull.
+TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target default.target

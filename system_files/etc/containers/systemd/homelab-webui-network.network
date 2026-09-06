@@ -2,7 +2,6 @@
 NetworkName=homelab-webui-network
 Driver=bridge
 DisableDNS=false
-IPAMConfig=
 Internal=false
 
 [Install]

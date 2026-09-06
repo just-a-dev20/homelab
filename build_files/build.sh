@@ -61,6 +61,19 @@ done
 # Instead, the quadlet generator auto-enables them at boot from their
 # [Install] WantedBy= sections. Just ensure the files are present under
 # /etc/containers/systemd (copied above) and carry an [Install] section.
+# Validate keys with:
+#   QUADLET_UNIT_DIRS=/etc/containers/systemd \
+#     /usr/lib/systemd/system-generators/podman-system-generator --dryrun
+# (valid [Container] pull key is `Pull=`, not `PullPolicy=`; valid [Network]
+# keys include Driver/NetworkName/DisableDNS/Internal — no `IPAMConfig=`.)
+#
+# `AutoUpdate=registry` in the .container files needs this timer to actually
+# pull updates in the background (boot itself uses `Pull=missing` from cache).
+for unit in podman-auto-update.timer firewalld.service; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+        systemctl enable "$unit"
+    fi
+done
 
 ### Configure firewall for Homelab WebUI
 firewall-offline-cmd --zone=public --add-service=homelab-webui
