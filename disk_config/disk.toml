@@ -1,3 +1,11 @@
-[[customizations.filesystem]]
-mountpoint = "/"
+# NOTE: `customizations.filesystem` is NOT supported for the qcow2/raw
+# image types by current bootc-image-builder (it fails blueprint validation
+# with "customizations.filesystem: not supported"). Use `customizations.disk`
+# instead. With --rootfs=btrfs the root must live in a btrfs volume.
+[[customizations.disk.partitions]]
+type = "btrfs"
 minsize = "20 GiB"
+
+[[customizations.disk.partitions.subvolumes]]
+name = "root"
+mountpoint = "/"
