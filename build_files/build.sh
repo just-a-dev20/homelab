@@ -24,7 +24,8 @@ dnf5 install -y \
     moby-engine \
     docker-compose \
     docker-compose-switch \
-    docker-buildx
+    docker-buildx \
+    jq
 
 ### Enable system services
 systemctl enable podman.socket
@@ -67,6 +68,15 @@ done
 # (valid [Container] pull key is `Pull=`, not `PullPolicy=`; valid [Network]
 # keys include Driver/NetworkName/DisableDNS/Internal — no `IPAMConfig=`.)
 #
+# WebUI images are truly preinstalled via bootc logically bound images:
+#   system_files/usr/share/containers/systemd/homelab-webui-{frontend,backend}.image
+#   system_files/usr/lib/bootc/bound-images.d/ (symlinks into the .image files)
+# bootc/BIB seeds them into the read-only store /usr/lib/bootc/storage at
+# install time and refreshes them on `bootc upgrade`; the .container units
+# reach that store via `GlobalArgs=--storage-opt additionalimagestore=...`,
+# so first boot needs no registry access. Do NOT list that store globally in
+# storage.conf (bootc owns its lifecycle/GC).
+#
 # `AutoUpdate=registry` in the .container files needs this timer to actually
 # pull updates in the background (boot itself uses `Pull=missing` from cache).
 for unit in podman-auto-update.timer firewalld.service; do
@@ -74,6 +84,15 @@ for unit in podman-auto-update.timer firewalld.service; do
         systemctl enable "$unit"
     fi
 done
+
+### Homelab OS update bridge (WebUI Settings → Updates)
+# Regular (non-quadlet) units, so `systemctl enable` works normally here.
+# The WebUI backend requests OS updates through intent files in
+# /var/lib/homelab-webui/os-update (see /usr/libexec/homelab-os-update):
+#   homelab-os-update-check.timer  — daily `bootc upgrade --check` status refresh
+#   homelab-os-update-dispatcher.path — runs check/stage/reboot on UI request
+systemctl enable homelab-os-update-check.timer
+systemctl enable homelab-os-update-dispatcher.path
 
 ### Configure firewall for Homelab WebUI
 firewall-offline-cmd --zone=public --add-service=homelab-webui

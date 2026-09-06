@@ -20,6 +20,8 @@
 - **Server Administration & Diagnostics**:
   - Web console via Cockpit (included in uCore base).
   - Pre-installed: `tmux`, `htop`, `iotop`, `smartmontools`, `rsync`, `lm_sensors`, `curl`, `wget`, `git`, `tree`.
+- **Preinstalled Homelab WebUI**: frontend + backend container images ship inside the OS image (bootc logically bound images) and start automatically on boot, even with no registry access. They are refreshed atomically on `bootc upgrade`.
+- **One-click updates**: Settings → Updates in the WebUI checks (`bootc upgrade --check`), stages (`bootc upgrade`), and reboots into new OS + WebUI images via the host updater (`homelab-os-update-check.timer`, `homelab-os-update-dispatcher.path`). Daily checks run automatically; auto-staging is opt-in.
 - **Bootable Media Support**: Ready-made configs for bare-metal Anaconda installer ISOs and QCOW2 VM disks.
 - **Automated CI/CD**: Builds and releases to GitHub Container Registry (`ghcr.io/just-a-dev20/homelab`).
 

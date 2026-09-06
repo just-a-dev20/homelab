@@ -1,0 +1,272 @@
+#!/bin/bash
+#
+# homelab-os-update — Homelab OS (bootc) update helper.
+#
+# The WebUI backend runs containerized without host privileges, so it cannot
+# call `bootc` directly. Instead it talks to the host through small files in
+# /var/lib/homelab-webui/os-update (mounted into the backend as /data):
+#
+#   config.json   { "autoUpdate": bool }          written by backend (PUT /api/update/config)
+#   request.json  { "action": "check"|"stage"|"reboot", "rebootAfterStage": bool, ... }
+#                                                 written by backend, consumed by the dispatcher
+#   status.json   update state, written ONLY by this script (see write_status)
+#
+# Usages:
+#   homelab-os-update check              refresh status.json (timer + manual checks)
+#   homelab-os-update dispatch           consume request.json and run one action (path unit)
+#   homelab-os-update stage [--reboot]   stage `bootc upgrade` now (used by dispatch)
+#
+# Never auto-reboots unless --reboot was explicitly requested.
+
+set -uo pipefail
+
+STATE_DIR="${HOMELAB_OS_UPDATE_STATE_DIR:-/var/lib/homelab-webui/os-update}"
+STATUS_FILE="$STATE_DIR/status.json"
+CONFIG_FILE="$STATE_DIR/config.json"
+REQUEST_FILE="$STATE_DIR/request.json"
+
+log() { echo "homelab-os-update: $*" >&2; }
+
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# json_escape <string> — print string as a JSON string literal (needs python3 or jq).
+json_escape() {
+  if have_cmd python3; then
+    printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+  elif have_cmd jq; then
+    printf '%s' "$1" | jq -Rs .
+  else
+    # last resort: strip characters that would break JSON
+    printf '"%s"' "$(printf '%s' "$1" | tr -d '"\n\\' | head -c 2000)"
+  fi
+}
+
+# bootc_json — print `bootc status` JSON, or empty string on failure.
+bootc_json() {
+  if ! have_cmd bootc; then return 1; fi
+  local out
+  if out="$(bootc status --format json 2>/dev/null)"; then printf '%s' "$out"; return 0; fi
+  if out="$(bootc status --json 2>/dev/null)"; then printf '%s' "$out"; return 0; fi
+  return 1
+}
+
+# jq_first <json> <filter...> — first non-empty scalar from candidate filters.
+jq_first() {
+  local json="$1"; shift
+  local f parts=""
+  for f in "$@"; do parts+="($f),"; done
+  parts="${parts%,}"
+  # shellcheck disable=SC2016
+  printf '%s' "$json" | jq -r "[ $parts | select(. != null and . != \"\") ] | first // empty" 2>/dev/null
+}
+
+# collect booted/staged info into shell vars: BOOTED_IMAGE, BOOTED_VERSION,
+# BOOTED_DIGEST, STAGED_PRESENT, STAGED_IMAGE, STAGED_VERSION, BOOTC_OK.
+collect_deployments() {
+  BOOTED_IMAGE=""; BOOTED_VERSION=""; BOOTED_DIGEST=""
+  STAGED_PRESENT="false"; STAGED_IMAGE=""; STAGED_VERSION=""
+  BOOTC_OK="false"
+  local json
+  json="$(bootc_json)" || return 0
+  BOOTC_OK="true"
+  BOOTED_IMAGE="$(jq_first "$json" \
+    '.status.booted.image.image' '.status.booted.image' '.booted.image' 2>/dev/null)"
+  BOOTED_VERSION="$(jq_first "$json" \
+    '.status.booted.version' '.status.booted.image.version' '.booted.version' 2>/dev/null)"
+  BOOTED_DIGEST="$(jq_first "$json" \
+    '.status.booted.image.imageDigest' '.status.booted.imageDigest' '.booted.digest' 2>/dev/null)"
+  local staged
+  staged="$(printf '%s' "$json" | jq -c '.status.staged // .staged // empty' 2>/dev/null)"
+  if [ -n "$staged" ] && [ "$staged" != "null" ]; then
+    STAGED_PRESENT="true"
+    STAGED_IMAGE="$(jq_first "$json" '.status.staged.image.image' '.status.staged.image' '.staged.image' 2>/dev/null)"
+    STAGED_VERSION="$(jq_first "$json" '.status.staged.version' '.status.staged.image.version' '.staged.version' 2>/dev/null)"
+  fi
+  # Fallback: some bootc versions only expose text status; detect a staged entry.
+  if [ "$STAGED_PRESENT" != "true" ] && bootc status 2>/dev/null | grep -qiE '^[[:space:]]*staged'; then
+    STAGED_PRESENT="true"
+  fi
+}
+
+# classify_check_output — echo true/false/unknown from `bootc upgrade --check` text.
+# NOTE: against floating tags (e.g. :latest) --check can report false
+# negatives, so callers also treat a staged deployment as "update pending".
+classify_check_output() {
+  local low
+  low="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  if printf '%s' "$low" | grep -qE 'updates? available:[[:space:]]*(yes|true)|(^|[^a-z])update available([^a-z]|$)'; then
+    echo "true"; return 0
+  fi
+  if printf '%s' "$low" | grep -qE 'no updates? available|up to date|already.*(latest|up.to.date)'; then
+    echo "false"; return 0
+  fi
+  echo "unknown"
+}
+
+write_status() {
+  # args: updateAvailable(true/false/unknown) lastError(json string or null)
+  local avail="$1" err="$2"
+  local now booted_v staged_v
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$STATE_DIR"
+  {
+    printf '{\n'
+    printf '  "schemaVersion": 1,\n'
+    printf '  "provider": "bootc",\n'
+    printf '  "checkedAt": "%s",\n' "$now"
+    printf '  "bootcPresent": %s,\n' "$([ "$BOOTC_OK" = "true" ] && echo true || echo false)"
+    printf '  "booted": {"image": %s, "version": %s, "digest": %s},\n' \
+      "$(json_escape "$BOOTED_IMAGE")" "$(json_escape "$BOOTED_VERSION")" "$(json_escape "$BOOTED_DIGEST")"
+    printf '  "staged": {"present": %s, "image": %s, "version": %s},\n' \
+      "$STAGED_PRESENT" "$(json_escape "$STAGED_IMAGE")" "$(json_escape "$STAGED_VERSION")"
+    if [ "$avail" = "unknown" ]; then
+      printf '  "updateAvailable": null,\n'
+    else
+      printf '  "updateAvailable": %s,\n' "$avail"
+    fi
+    printf '  "check": {"exitCode": %s, "output": %s},\n' \
+      "${CHECK_EXIT:-null}" "$(json_escape "${CHECK_OUTPUT:-}")"
+    printf '  "lastApply": %s,\n' "${LAST_APPLY_JSON:-null}"
+    printf '  "error": %s\n' "$err"
+    printf '}\n'
+  } > "$STATUS_FILE.tmp" && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
+}
+
+# merge previous lastApply block so checks don't wipe apply history.
+load_last_apply() {
+  LAST_APPLY_JSON="null"
+  if [ -f "$STATUS_FILE" ] && have_cmd jq; then
+    LAST_APPLY_JSON="$(jq -c '.lastApply // null' "$STATUS_FILE" 2>/dev/null || echo null)"
+  fi
+}
+
+read_config_auto() {
+  # echo true only when config.json explicitly enables autoUpdate
+  if [ -f "$CONFIG_FILE" ] && have_cmd jq; then
+    [ "$(jq -r '.autoUpdate // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && echo "true" || echo "false"
+  else
+    echo "false"
+  fi
+}
+
+cmd_check() {
+  collect_deployments
+  load_last_apply
+  CHECK_OUTPUT=""; CHECK_EXIT="null"
+  local avail="unknown" err="null"
+  if [ "$BOOTC_OK" != "true" ]; then
+    err="$(json_escape 'bootc not found on host; cannot check for OS updates')"
+  else
+    # NB: run in this shell (not $()) so CHECK_OUTPUT/CHECK_EXIT persist.
+    CHECK_OUTPUT="$(bootc upgrade --check 2>&1)"
+    CHECK_EXIT="$?"
+    avail="$(classify_check_output "$CHECK_OUTPUT")"
+    # A staged deployment always means an update is pending, even if --check
+    # disagrees (floating tags can yield false negatives).
+    if [ "$STAGED_PRESENT" = "true" ]; then avail="true"; fi
+    # Auto-stage (never auto-reboot) when the user opted into auto updates.
+    if [ "$avail" = "true" ] && [ "$STAGED_PRESENT" != "true" ] \
+        && [ "$(read_config_auto)" = "true" ]; then
+      log "autoUpdate enabled and update available; staging"
+      if out="$(bootc upgrade 2>&1)"; then
+        collect_deployments
+        LAST_APPLY_JSON="$(printf '{"at": "%s", "mode": "auto-stage", "rebooted": false}' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+      else
+        err="$(json_escape "auto-stage failed: $(printf '%s' "$out" | head -c 500)")"
+      fi
+    fi
+  fi
+  write_status "$avail" "$err"
+}
+
+cmd_stage() {
+  # cmd_stage [--reboot]
+  local want_reboot="false"
+  [ "${1:-}" = "--reboot" ] && want_reboot="true"
+  collect_deployments
+  load_last_apply
+  CHECK_OUTPUT=""; CHECK_EXIT="null"
+  local err="null" mode="manual-stage"
+  if [ "$BOOTC_OK" != "true" ]; then
+    err="$(json_escape 'bootc not found on host; cannot stage OS update')"
+    write_status "unknown" "$err"
+    return 0
+  fi
+  local out
+  if out="$(bootc upgrade 2>&1)"; then
+    collect_deployments
+    if [ "$STAGED_PRESENT" != "true" ]; then
+      # Already on latest: upgrade is a no-op success.
+      LAST_APPLY_JSON="$(printf '{"at": "%s", "mode": "manual-stage", "result": "already-current", "rebooted": false}' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+      write_status "false" "null"
+      return 0
+    fi
+  else
+    err="$(json_escape "bootc upgrade failed: $(printf '%s' "$out" | head -c 500)")"
+    write_status "true" "$err"
+    return 0
+  fi
+  if [ "$want_reboot" = "true" ]; then
+    mode="manual-stage-reboot"
+    LAST_APPLY_JSON="$(printf '{"at": "%s", "mode": "%s", "rebooted": true}' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mode")"
+    write_status "true" "null"
+    log "staged update ready; rebooting as requested"
+    sleep 2
+    systemctl reboot
+  else
+    LAST_APPLY_JSON="$(printf '{"at": "%s", "mode": "%s", "rebooted": false}' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mode")"
+    write_status "true" "null"
+  fi
+}
+
+cmd_dispatch() {
+  # Consume request.json (if any) and run a single action. Safe to run when
+  # there is nothing to do (path unit also fires on our own deletion).
+  if [ ! -f "$REQUEST_FILE" ]; then return 0; fi
+  local work="$STATE_DIR/.request.processing"
+  mv -f "$REQUEST_FILE" "$work" 2>/dev/null || return 0
+  local action reboot
+  action=""; reboot="false"
+  if have_cmd jq; then
+    action="$(jq -r '.action // empty' "$work" 2>/dev/null)"
+    [ "$(jq -r '.rebootAfterStage // false' "$work" 2>/dev/null)" = "true" ] && reboot="true"
+  else
+    action="$(grep -oE '"action"[[:space:]]*:[[:space:]]*"[a-z]+"' "$work" 2>/dev/null \
+      | head -1 | sed -E 's/.*\"([a-z]+)\"$/\1/')"
+    grep -qE '"rebootAfterStage"[[:space:]]*:[[:space:]]*true' "$work" 2>/dev/null && reboot="true"
+  fi
+  rm -f "$work"
+  case "$action" in
+    check) cmd_check ;;
+    stage)
+      if [ "$reboot" = "true" ]; then cmd_stage --reboot; else cmd_stage; fi ;;
+    reboot)
+      collect_deployments
+      load_last_apply
+      if [ "$STAGED_PRESENT" = "true" ]; then
+        LAST_APPLY_JSON="$(printf '{"at": "%s", "mode": "manual-reboot", "rebooted": true}' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+        CHECK_OUTPUT=""; CHECK_EXIT="null"
+        write_status "true" "null"
+        log "reboot requested with staged update; rebooting"
+        sleep 2
+        systemctl reboot
+      else
+        CHECK_OUTPUT=""; CHECK_EXIT="null"
+        write_status "false" "$(json_escape 'reboot requested but no staged update is present')"
+      fi
+      ;;
+    *) log "ignoring request with unknown/empty action: '$action'" ;;
+  esac
+}
+
+case "${1:-}" in
+  check) cmd_check ;;
+  dispatch) cmd_dispatch ;;
+  stage) cmd_stage "${2:-}" ;;
+  *) echo "usage: $0 {check|dispatch|stage [--reboot]}" >&2; exit 2 ;;
+esac

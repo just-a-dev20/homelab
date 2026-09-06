@@ -13,6 +13,10 @@ AutoUpdate=registry
 # Pull policy (quadlet key is `Pull=`, not `PullPolicy=`).
 # `missing` = pull once, then boot offline from cache; updates via auto-update timer.
 Pull=missing
+# Use bootc's read-only bound-image store (/usr/lib/bootc/storage, seeded at
+# install/upgrade from the .image files in bound-images.d) so first boot works
+# with no registry access. Do NOT enable it globally in storage.conf.
+GlobalArgs=--storage-opt additionalimagestore=/usr/lib/bootc/storage
 
 [Service]
 Restart=always

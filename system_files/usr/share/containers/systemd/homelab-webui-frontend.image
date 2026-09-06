@@ -1,0 +1,5 @@
+[Image]
+# Must match Image= in homelab-webui-frontend.container exactly.
+Image=ghcr.io/just-a-dev20/homelab-webui-frontend:latest
+# Only pull when not already in a store (bootc pre-seeds /usr/lib/bootc/storage).
+Policy=missing

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run one Homelab WebUI OS update request (bootc)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/homelab-os-update dispatch
+# Staging downloads a full OS image; do not let systemd kill a slow fetch.
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

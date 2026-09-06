@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch for Homelab WebUI OS update requests
+
+[Path]
+# Written by the WebUI backend (container) via /data/os-update/request.json.
+PathModified=/var/lib/homelab-webui/os-update/request.json
+TriggerLimitIntervalSec=10
+TriggerLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
