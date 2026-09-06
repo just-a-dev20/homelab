@@ -1,0 +1,48 @@
+# Homelab OS override of the base image's s390x partition layout.
+#
+# Origin: copy of /usr/lib/image-builder/bootc/s390x.yaml shipped by the
+# uCore base image, with two fields removed for compatibility with the
+# pinned bootc-image-builder (see x86_64.yaml in this directory):
+#   - `payload.mkfs_options.agcount`
+#   - explicit `partnum` on boot/root (unknown to that BIB version;
+#     partition order in the file already yields slots 3 and 4... note:
+#     without partnum the table is compacted to slots 1 and 2, which is
+#     fine for a fresh install)
+# Layout, GUIDs and sizes are otherwise unchanged.
+mount_configuration: none
+partition_table:
+  type: "gpt"
+  uuid: "00000000-0000-4000-a000-000000000001"
+  # Reserve the last 2048 512-byte blocks for CoreOS which moves the
+  # secondary GPT header to the end of the disk on first boot.
+  # See https://github.com/coreos/fedora-coreos-config/blob/7fbf510367d495529d2a915707b547d4c663f609/overlay.d/05core/usr/lib/dracut/modules.d/35coreos-ignition/coreos-gpt-setup.sh#L30
+  extra_padding: 1031168
+  partitions:
+    # s390x has no BIOS/EFI/PReP boot partition.
+
+    # Extended Boot Loader partition
+    - label: "boot"
+      size: "384 MiB"
+      type: BC13C2FF-59E6-4262-A352-B275FD6F7172
+      payload_type: "filesystem"
+      payload:
+        type: "ext4"
+        uuid: "96d15588-3596-4b3c-adca-a2ff7279ea63"
+        mountpoint: "/boot"
+        label: "boot"
+        fstab_options: "defaults"
+        fstab_freq: 0
+        fstab_passno: 0
+
+    # Root partition — DPS type for s390x
+    - label: "root"
+      type: 5EEAD9A9-FE09-4A1E-A1D7-520D00531306
+      payload_type: "filesystem"
+      payload:
+        type: "xfs"
+        uuid: "910678ff-f77e-4a7d-8d53-86f2ac47a823"
+        mountpoint: "/"
+        label: "root"
+        fstab_options: "defaults"
+        fstab_freq: 0
+        fstab_passno: 0
